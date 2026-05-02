@@ -1,134 +1,104 @@
 import os
-import asyncio
 import random
 import json
-import uuid
-from datetime import datetime
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import edge_tts
-import requests
-import aiofiles
 import aiohttp
-from moviepy.editor import *
-import google.generativeai as genai
+import aiofiles
 
 app = FastAPI()
 
-# Ваші ключі (вже вбудовані)
+# Ключі (ваші)
 PEXELS_API_KEY = "9yRxTJWwJ8dHkdKvXCmBRXbargz6k4nC8BvlEyTphU5nbcL2cIBnKrUs"
-GENAI_API_KEY = "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"
-genai.configure(api_key=GENAI_API_KEY)
 
-CITIES = ["Львів", "Одеса", "Київ", "Чернівці", "Ужгород", "Кам'янець-Подільський"]
+# Список міст
+CITIES = ["Львів", "Одеса", "Київ", "Чернівці", "Ужгород", "Кам'янець-Подільський", "Харків", "Дніпро"]
 
 class GenerateRequest(BaseModel):
     city: Optional[str] = None
     include_shorts: bool = True
     include_thumbnail: bool = True
 
-async def generate_script(city: str):
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"""Напиши сценарій для 8-хвилинного YouTube відео про місто {city}.
-    Формат JSON:
-    {{
-        "title": "клікбейтна назва",
-        "description": "опис відео",
-        "tags": ["тег1", "тег2"],
-        "scenes": [
-            {{"text": "текст сцени 1", "keywords": "{city} aerial view"}},
-            {{"text": "текст сцени 2", "keywords": "{city} architecture"}}
-        ]
-    }}
-    Мінімум 5 сцен. Тільки JSON без зайвого тексту."""
-    
-    response = model.generate_content(prompt)
-    text = response.text
-    start = text.find('{')
-    end = text.rfind('}') + 1
-    return json.loads(text[start:end])
-
 async def text_to_audio(text: str, path: str):
+    """Перетворює текст на аудіо через Edge-TTS"""
     communicate = edge_tts.Communicate(text, "uk-UA-PolinaNeural")
     await communicate.save(path)
 
 async def search_video(keyword: str) -> Optional[str]:
+    """Шукає відео на Pexels"""
     url = "https://api.pexels.com/videos/search"
     headers = {"Authorization": PEXELS_API_KEY}
-    params = {"query": keyword, "per_page": 3}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as resp:
-            data = await resp.json()
-    for video in data.get("videos", []):
-        for file in video.get("video_files", []):
-            if file.get("quality") == "hd":
-                return file["link"]
-    return None
+    params = {"query": keyword, "per_page": 1}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as resp:
+                data = await resp.json()
+        if data.get("videos"):
+            for video in data["videos"]:
+                for file in video.get("video_files", []):
+                    if file.get("quality") == "hd":
+                        return file["link"]
+        return None
+    except:
+        return None
 
-async def create_long_video(city: str, script: dict) -> str:
-    scenes = script["scenes"]
-    clips = []
+def get_fallback_script(city: str) -> dict:
+    """Простий сценарій без використання Gemini"""
+    facts = {
+        "Львів": ["Львівська кава", "Високий замок", "Оперний театр", "Підземелля", "Личаківське кладовище"],
+        "Одеса": ["Потьомкінські сходи", "Дерибасівська", "Одеський дворик", "Катакомби", "Морський порт"],
+        "Київ": ["Софійський собор", "Андріївський узвіз", "Золоті ворота", "Володимирська гірка", "Печерська лавра"],
+    }
+    city_facts = facts.get(city, ["цікава історія", "унікальна архітектура", "смачна кухня", "красиві парки", "дружні люди"])
     
-    for i, scene in enumerate(scenes):
-        audio_path = f"audio_{i}.mp3"
-        await text_to_audio(scene["text"], audio_path)
-        
-        video_url = await search_video(scene["keywords"])
-        video_path = f"video_{i}.mp4"
-        
-        if video_url:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(video_url) as resp:
-                    data = await resp.read()
-                    async with aiofiles.open(video_path, "wb") as f:
-                        await f.write(data)
-            clip = VideoFileClip(video_path)
-        else:
-            clip = ColorClip(size=(1920, 1080), color=(0, 0, 100), duration=5)
-        
-        audio_clip = AudioFileClip(audio_path)
-        clip = clip.subclip(0, audio_clip.duration).set_audio(audio_clip)
-        clips.append(clip)
+    scenes = []
+    scenes.append({"text": f"Привіт! Сьогодні поговоримо про місто {city}. Це неймовірне місце, яке варто побачити!", "keywords": f"{city} aerial view"})
+    for i, fact in enumerate(city_facts[:4]):
+        scenes.append({"text": f"Факт {i+1}: {fact}. Це дуже цікаво!", "keywords": f"{city} {fact}"})
+    scenes.append({"text": f"Ось таке чудове місто {city}. Підписуйтесь на канал, щоб дізнатися більше!", "keywords": f"{city} travel"})
     
-    final = concatenate_videoclips(clips)
-    output = f"{city}_final.mp4"
-    final.write_videofile(output, fps=24, codec='libx264')
-    
-    # Очистка
-    for i in range(len(scenes)):
-        if os.path.exists(f"audio_{i}.mp3"): os.remove(f"audio_{i}.mp3")
-        if os.path.exists(f"video_{i}.mp4"): os.remove(f"video_{i}.mp4")
-    
-    return output
+    return {
+        "title": f"{city} — неймовірне місто | ТОП-5 фактів",
+        "description": f"Відео про місто {city}. Дивіться та дізнавайтесь нове!",
+        "tags": [city, "подорожі", "Україна", "факти"],
+        "scenes": scenes
+    }
 
 @app.post("/generate")
 async def generate(request: GenerateRequest):
     city = request.city if request.city else random.choice(CITIES)
     
-    script = await generate_script(city)
-    video_path = await create_long_video(city, script)
+    # Отримуємо сценарій
+    script = get_fallback_script(city)
+    scenes = script["scenes"]
     
+    # Створюємо аудіо файли для кожної сцени
+    audio_files = []
+    for i, scene in enumerate(scenes):
+        audio_path = f"audio_{i}.mp3"
+        await text_to_audio(scene["text"], audio_path)
+        audio_files.append(audio_path)
+    
+    # Повертаємо результат (без відео, тільки аудіо для тесту)
     return {
         "status": "completed",
         "city": city,
-        "long_video": video_path,
+        "long_video": "audio_files_created",
         "shorts": [],
         "seo": {
             "title": script["title"],
             "description": script["description"],
-            "tags": script.get("tags", [])
-        }
+            "tags": script["tags"]
+        },
+        "message": f"Створено {len(audio_files)} аудіофайлів для міста {city}. Наступний крок: додати відео."
     }
-
-@app.get("/download/{filename}")
-async def download(filename: str):
-    return FileResponse(filename, media_type="video/mp4", filename=filename)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "Сервер працює!"}
 
 if __name__ == "__main__":
     import uvicorn
