@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random City Video</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            min-height: 100vh;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 32px;
+            padding: 24px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 18px;
+            border-radius: 60px;
+            width: 100%;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+        .random-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+        input {
+            width: 100%;
+            padding: 16px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 60px;
+            margin: 10px 0;
+        }
+        .progress {
+            display: none;
+            background: #f0f0f0;
+            border-radius: 20px;
+            padding: 16px;
+            margin-top: 20px;
+        }
+        .result {
+            display: none;
+            margin-top: 20px;
+        }
+        .download-btn {
+            background: #2196F3;
+            margin: 5px 0;
+        }
+        .api-field {
+            background: #fff3e0;
+            border-radius: 16px;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .api-field input {
+            padding: 12px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🏙️ Random City Video</h1>
+    
+    <div class="api-field">
+        <label>🔗 Адреса вашого сервера (з'явиться після кроку 4):</label>
+        <input type="text" id="apiUrl" placeholder="https://ваш-сервер.railway.app">
+    </div>
+
+    <button class="random-btn" id="randomBtn">✨ Випадкове місто ✨</button>
+    
+    <div style="text-align:center; margin:10px">— АБО —</div>
+    
+    <input type="text" id="cityInput" placeholder="Введіть назву міста">
+    <button id="generateBtn">Створити відео</button>
+
+    <div class="progress" id="progress">
+        <div>⏳ Генерація... зачекайте 2-5 хвилин</div>
+        <div style="font-size:12px; color:#666" id="status"></div>
+    </div>
+
+    <div class="result" id="result"></div>
+</div>
+
+<script>
+    const apiInput = document.getElementById('apiUrl');
+    const randomBtn = document.getElementById('randomBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const cityInput = document.getElementById('cityInput');
+    const progressDiv = document.getElementById('progress');
+    const resultDiv = document.getElementById('result');
+
+    let API_URL = localStorage.getItem('apiUrl') || '';
+    apiInput.value = API_URL;
+
+    apiInput.addEventListener('change', () => {
+        API_URL = apiInput.value;
+        localStorage.setItem('apiUrl', API_URL);
+    });
+
+    async function generate(city) {
+        if (!API_URL) {
+            alert('Спочатку вставте адресу сервера (отримаєте на кроці 4)');
+            return;
+        }
+        progressDiv.style.display = 'block';
+        resultDiv.innerHTML = '';
+        document.getElementById('status').innerText = 'Відео створюється...';
+
+        try {
+            const res = await fetch(`${API_URL}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ city: city, include_shorts: true, include_thumbnail: true })
+            });
+            const data = await res.json();
+            
+            let html = `<button class="download-btn" onclick="window.open('${API_URL}/download/${data.long_video}')">📥 Завантажити відео (8 хв)</button>`;
+            if (data.shorts && data.shorts.length) {
+                html += `<button class="download-btn" onclick="window.open('${API_URL}/download/${data.shorts[0]}')">📥 Завантажити Shorts</button>`;
+            }
+            if (data.seo) {
+                html += `<div style="background:#f5f5f5; padding:12px; border-radius:16px; margin-top:12px">
+                    <strong>SEO для YouTube:</strong><br>
+                    Назва: ${data.seo.title}<br>
+                    <button onclick="navigator.clipboard.writeText('${data.seo.title}\n\n${data.seo.description}')">📋 Копіювати назву та опис</button>
+                </div>`;
+            }
+            resultDiv.innerHTML = html;
+        } catch(e) {
+            resultDiv.innerHTML = `<div style="color:red">❌ Помилка: ${e.message}</div>`;
+        }
+        progressDiv.style.display = 'none';
+    }
+
+    randomBtn.onclick = () => generate(null);
+    generateBtn.onclick = () => {
+        const city = cityInput.value.trim();
+        if (city) generate(city);
+        else alert('Введіть назву міста');
+    };
+</script>
+</body>
+</html>

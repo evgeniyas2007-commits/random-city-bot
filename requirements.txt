@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+edge-tts
+moviepy
+pexels-api
+google-generativeai
+python-dotenv
+aiofiles
+Pillow
+numpy
+ffmpeg-python
